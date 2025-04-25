@@ -62,6 +62,13 @@ return [
             'connection' => env('DB_CONNECTION', 'mysql'),
             'chunk' => 1000,
         ],
+
+        'influx' => [
+            'url' => env('TELESCOPE_INFLUX_URL', 'http://localhost:8086'),
+            'token' => env('TELESCOPE_INFLUX_TOKEN', 'token'),
+            'bucket' => env('TELESCOPE_INFLUX_BUCKET', 'influxBucket'),
+            'org' => env('TELESCOPE_INFLUX_ORG', 'organizationAccount')
+        ]
     ],
 
     /*
