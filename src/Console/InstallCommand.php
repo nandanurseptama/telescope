@@ -15,7 +15,7 @@ class InstallCommand extends Command
      *
      * @var string
      */
-    protected $signature = 'telescope:install';
+    protected $signature = 'telescope:install {--driver=database : Select driver. Default database}';
 
     /**
      * The console command description.
@@ -37,11 +37,9 @@ class InstallCommand extends Command
         $this->comment('Publishing Telescope Assets...');
         $this->callSilent('vendor:publish', ['--tag' => 'telescope-assets']);
 
-        $this->comment('Publishing Telescope Configuration...');
-        $this->callSilent('vendor:publish', ['--tag' => 'telescope-config']);
+        $this->publishTelescopeConfig();
 
-        $this->comment('Publishing Telescope Migrations...');
-        $this->callSilent('vendor:publish', ['--tag' => 'telescope-migrations']);
+        $this->publishTelescopeMigrations();
 
         $this->registerTelescopeServiceProvider();
 
@@ -55,8 +53,10 @@ class InstallCommand extends Command
      */
     protected function registerTelescopeServiceProvider()
     {
-        if (method_exists(ServiceProvider::class, 'addProviderToBootstrapFile') &&
-            ServiceProvider::addProviderToBootstrapFile(\App\Providers\TelescopeServiceProvider::class)) { // @phpstan-ignore-line
+        if (
+            method_exists(ServiceProvider::class, 'addProviderToBootstrapFile') &&
+            ServiceProvider::addProviderToBootstrapFile(\App\Providers\TelescopeServiceProvider::class)
+        ) { // @phpstan-ignore-line
             return;
         }
 
@@ -64,7 +64,7 @@ class InstallCommand extends Command
 
         $appConfig = file_get_contents(config_path('app.php'));
 
-        if (Str::contains($appConfig, $namespace.'\\Providers\\TelescopeServiceProvider::class')) {
+        if (Str::contains($appConfig, $namespace . '\\Providers\\TelescopeServiceProvider::class')) {
             return;
         }
 
@@ -77,8 +77,8 @@ class InstallCommand extends Command
         $eol = array_keys($lineEndingCount, max($lineEndingCount))[0];
 
         file_put_contents(config_path('app.php'), str_replace(
-            "{$namespace}\\Providers\RouteServiceProvider::class,".$eol,
-            "{$namespace}\\Providers\RouteServiceProvider::class,".$eol."        {$namespace}\Providers\TelescopeServiceProvider::class,".$eol,
+            "{$namespace}\\Providers\RouteServiceProvider::class," . $eol,
+            "{$namespace}\\Providers\RouteServiceProvider::class," . $eol . "        {$namespace}\Providers\TelescopeServiceProvider::class," . $eol,
             $appConfig
         ));
 
@@ -87,5 +87,52 @@ class InstallCommand extends Command
             "namespace {$namespace}\Providers;",
             file_get_contents(app_path('Providers/TelescopeServiceProvider.php'))
         ));
+    }
+
+    /**
+     * Publish telescope config file.
+     *
+     * if selected driver option is not 'database'
+     * will change default driver.
+     *
+     * @return void
+     */
+    private function publishTelescopeConfig()
+    {
+        $this->comment('Publishing Telescope Configuration...');
+        $this->callSilent('vendor:publish', ['--tag' => 'telescope-config']);
+
+        $driver = $this->option('driver');
+
+        if (strtolower($driver) === 'database') {
+            return;
+        }
+
+        $telescopeConfig = file_get_contents(config_path('telescope.php'));
+
+        file_put_contents(config_path('telescope.php'), str_replace(
+            "env('TELESCOPE_DRIVER', 'database')",
+            "env('TELESCOPE_DRIVER', 'influx')",
+            $telescopeConfig
+        ));
+    }
+
+    /**
+     * Publish telescope migrations.
+     *
+     * if driver option is not 'database' dont publish migrations file
+     *
+     * @return void
+     */
+    private function publishTelescopeMigrations()
+    {
+        $driver = $this->option('driver');
+
+        if (strtolower($driver) !== 'database') {
+            return;
+        }
+
+        $this->comment('Publishing Telescope Migrations...');
+        $this->callSilent('vendor:publish', ['--tag' => 'telescope-migrations']);
     }
 }
