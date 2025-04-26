@@ -8,6 +8,7 @@ use Laravel\Telescope\Contracts\EntriesRepository as Contract;
 use InfluxDB2\Client as InfluxClient;
 use Laravel\Telescope\EntryResult;
 use Laravel\Telescope\Storage\EntryQueryOptions;
+use \InfluxDB2\Model\WritePrecision;
 
 class DatabaseEntriesRepository implements Contract
 {
@@ -15,7 +16,7 @@ class DatabaseEntriesRepository implements Contract
 
     public function __construct(array $config)
     {
-        $config['precision'] = \InfluxDB2\Model\WritePrecision::NS;
+        $config['precision'] = WritePrecision::S;
         $this->client = new InfluxClient($config);
     }
 

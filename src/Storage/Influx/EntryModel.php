@@ -4,6 +4,7 @@ namespace Laravel\Telescope\Storage\Influx;
 
 use Illuminate\Support\Collection;
 use InfluxDB2\Client as InfluxClient;
+use InfluxDB2\Model\WritePrecision;
 use InfluxDB2\Point;
 use JsonSerializable;
 
@@ -73,12 +74,12 @@ class EntryModel implements JsonSerializable
             return;
         }
 
-        $writeApi = $this->client->createWriteApi([]);
+        $writeApi = $this->client->createWriteApi();
 
-        $entries->map(function ($row) {
-            $point =  Point::measurement('telescope_entries')
+        $entries = $entries->map(function ($row) {
+            $point = Point::measurement('telescope_entries')
                 ->addField('uuid', $row->uuid)
-                ->addField('content', $row->content)
+                ->addField('content', json_encode($row->content))
                 ->addField('batch_id', $row->batchId)
                 ->addField('family_hash', $row->familyHash)
                 ->addTag('type', $row->type);
@@ -89,9 +90,9 @@ class EntryModel implements JsonSerializable
                 }
             }
 
-            return $point;
+            return $point->time(microtime(true));
         });
 
-        $writeApi->write($entries->toArray());
+        $writeApi->write($entries->toArray(), WritePrecision::S);
     }
 }
