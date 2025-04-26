@@ -47,7 +47,7 @@ class TelescopeServiceProvider extends ServiceProvider
             'prefix' => config('telescope.path'),
             'middleware' => 'telescope',
         ], function () {
-            $this->loadRoutesFrom(__DIR__.'/../routes/web.php');
+            $this->loadRoutesFrom(__DIR__ . '/../routes/web.php');
         });
     }
 
@@ -58,7 +58,7 @@ class TelescopeServiceProvider extends ServiceProvider
      */
     protected function registerResources()
     {
-        $this->loadViewsFrom(__DIR__.'/../resources/views', 'telescope');
+        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'telescope');
     }
 
     /**
@@ -74,19 +74,19 @@ class TelescopeServiceProvider extends ServiceProvider
                 : 'publishes';
 
             $this->{$publishesMigrationsMethod}([
-                __DIR__.'/../database/migrations' => database_path('migrations'),
+                __DIR__ . '/../database/migrations' => database_path('migrations'),
             ], 'telescope-migrations');
 
             $this->publishes([
-                __DIR__.'/../public' => public_path('vendor/telescope'),
+                __DIR__ . '/../public' => public_path('vendor/telescope'),
             ], ['telescope-assets', 'laravel-assets']);
 
             $this->publishes([
-                __DIR__.'/../config/telescope.php' => config_path('telescope.php'),
+                __DIR__ . '/../config/telescope.php' => config_path('telescope.php'),
             ], 'telescope-config');
 
             $this->publishes([
-                __DIR__.'/../stubs/TelescopeServiceProvider.stub' => app_path('Providers/TelescopeServiceProvider.php'),
+                __DIR__ . '/../stubs/TelescopeServiceProvider.stub' => app_path('Providers/TelescopeServiceProvider.php'),
             ], 'telescope-provider');
         }
     }
@@ -118,7 +118,8 @@ class TelescopeServiceProvider extends ServiceProvider
     public function register()
     {
         $this->mergeConfigFrom(
-            __DIR__.'/../config/telescope.php', 'telescope'
+            __DIR__ . '/../config/telescope.php',
+            'telescope'
         );
 
         $this->registerStorageDriver();
@@ -133,7 +134,7 @@ class TelescopeServiceProvider extends ServiceProvider
     {
         $driver = config('telescope.driver');
 
-        if (method_exists($this, $method = 'register'.ucfirst($driver).'Driver')) {
+        if (method_exists($this, $method = 'register' . ucfirst($driver) . 'Driver')) {
             $this->$method();
         }
     }
@@ -146,15 +147,18 @@ class TelescopeServiceProvider extends ServiceProvider
     protected function registerDatabaseDriver()
     {
         $this->app->singleton(
-            EntriesRepository::class, DatabaseEntriesRepository::class
+            EntriesRepository::class,
+            DatabaseEntriesRepository::class
         );
 
         $this->app->singleton(
-            ClearableRepository::class, DatabaseEntriesRepository::class
+            ClearableRepository::class,
+            DatabaseEntriesRepository::class
         );
 
         $this->app->singleton(
-            PrunableRepository::class, DatabaseEntriesRepository::class
+            PrunableRepository::class,
+            DatabaseEntriesRepository::class
         );
 
         $this->app->when(DatabaseEntriesRepository::class)
@@ -164,5 +168,33 @@ class TelescopeServiceProvider extends ServiceProvider
         $this->app->when(DatabaseEntriesRepository::class)
             ->needs('$chunkSize')
             ->give(config('telescope.storage.database.chunk'));
+    }
+
+
+    /**
+     * Register the influx storage driver.
+     *
+     * @return void
+     */
+    protected function registerInfluxDriver()
+    {
+        $this->app->singleton(
+            EntriesRepository::class,
+            DatabaseEntriesRepository::class
+        );
+
+        $this->app->singleton(
+            ClearableRepository::class,
+            DatabaseEntriesRepository::class
+        );
+
+        $this->app->singleton(
+            PrunableRepository::class,
+            DatabaseEntriesRepository::class
+        );
+
+        $this->app->when(DatabaseEntriesRepository::class)
+            ->needs('$connection')
+            ->give(config('telescope.storage.database.connection'));
     }
 }
