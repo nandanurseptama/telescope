@@ -40,7 +40,22 @@ class DatabaseEntriesRepository implements Contract
      */
     public function get($type, EntryQueryOptions $options)
     {
-        return [];
+        return EntryModel::on($this->client)
+            ->withTelescopeOptions($type, $options)
+            ->take($options->limit)
+            ->get()
+            ->map(
+                fn($row, $index) => new EntryResult(
+                    $row['uuid'],
+                    $index,
+                    $row['batch_id'],
+                    $row['type'],
+                    $row['family_hash'],
+                    $row['content'],
+                    $row['created_at'],
+                    $row['tags']
+                )
+            );
     }
     /**
      * Store the given entries.

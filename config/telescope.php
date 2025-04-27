@@ -67,7 +67,8 @@ return [
             'url' => env('TELESCOPE_INFLUX_URL', 'http://localhost:8086'),
             'token' => env('TELESCOPE_INFLUX_TOKEN', 'token'),
             'bucket' => env('TELESCOPE_INFLUX_BUCKET', 'influxBucket'),
-            'org' => env('TELESCOPE_INFLUX_ORG', 'organizationAccount')
+            'org' => env('TELESCOPE_INFLUX_ORG', 'organizationAccount'),
+            'default_timerange' => env('TELESCOPE_INFLUX_DEFAULT_TIMERANGE', '-1d')
         ]
     ],
 
