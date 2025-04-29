@@ -4,6 +4,7 @@ namespace Laravel\Telescope\Storage\Influx;
 
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use Laravel\Telescope\Contracts\EntriesRepository as Contract;
 use InfluxDB2\Client as InfluxClient;
 use Laravel\Telescope\EntryResult;
@@ -65,6 +66,7 @@ class DatabaseEntriesRepository implements Contract
      */
     public function store(Collection $entries)
     {
+        // Log::info('store entries', ['entries' => $entries]);
         EntryModel::on($this->client)->storeEntries($entries);
         return;
     }

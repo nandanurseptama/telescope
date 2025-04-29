@@ -4,6 +4,7 @@ namespace Laravel\Telescope\Storage\Influx;
 
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use InfluxDB2\Client as InfluxClient;
 use InfluxDB2\Model\WritePrecision;
 use InfluxDB2\Point;
@@ -95,7 +96,7 @@ class EntryModel
             ->whereBatchId($options->batchId)
             ->whereFamilyHash($options->familyHash)
             ->whereUuid($options->uuids)
-            ->orderBy("_time", true)
+            ->orderBy("sequence", true)
             ->offset($options->beforeSequence);
     }
 
@@ -103,6 +104,7 @@ class EntryModel
     {
         $query = "from(bucket: \"$this->bucket\")";
         $timerange = $this->getDefaultTimerange();
+
         $query = join(
             "\n|> ",
             [
@@ -116,6 +118,15 @@ class EntryModel
             $filters = join("\n|> ", $this->filters);
             $query = join("\n|> ", [$query, $filters]);
         }
+
+        $query = join(
+            "\n|> ",
+            [
+                $query,
+                "map(fn: (r) => ({r with sequence : uint(v: r._time) / uint(v : 1000000)}))",
+                "pivot(rowKey: [\"sequence\"], columnKey: [\"_field\"], valueColumn: \"_value\")",
+            ]
+        );
 
         if (count($this->sorts) > 0) {
             $sorts = join("\n|> ", $this->sorts);
@@ -133,6 +144,7 @@ class EntryModel
             [
                 $query,
                 "limit(n : $this->limit $offset)",
+                "group(columns : [\"_time\", \"type\"])",
             ]
         );
 
@@ -145,7 +157,6 @@ class EntryModel
     public function get()
     {
         $query = $this->buildQuery();
-
         $queryApi = $this->client->createQueryApi();
         $tables = $queryApi->query($query);
 
@@ -161,24 +172,20 @@ class EntryModel
             'tags' => [],
         ];
 
+
         foreach ($tables as $table) {
-            foreach ($table->records as $rowNum => $record) {
-                $sequence = $rowNum + ($this->offset > 0 ? $this->offset + 1 : 0);
-                // because we will have multiple fields at the same second in time, we need to merge the data into a single array after we query it out
-                $row = key_exists($rowNum, $records) ? $records[$rowNum] : $rowPlaceholder;
-                $field = $record->getField();
-
-                $value = $field === 'content' ? json_decode($record->getValue(), true) : $record->getValue();
-
-                $records[$rowNum] = array_merge(
-                    $row,
-                    [
-                        $field => $value,
-                        'type' => $record['type'],
-                        'created_at' => Carbon::parse($record->getTime()),
-                        'sequence' => $sequence,
-                    ]
-                );
+            foreach ($table->records as $record) {
+                //dd($record);
+                array_push($records,[
+                    'type' => $record['type'],
+                    'created_at' => Carbon::createFromTimestampMs($record['sequence']),
+                    'sequence' => $record['sequence'],
+                    'batch_id' => $record['batch_id'],
+                    'uuid' => $record['uuid'],
+                    'family_hash' => $record['family_hash'],
+                    'content' => json_decode($record['content'], true),
+                    'tags' => [$record['type']],
+                ]);
             }
         }
 
@@ -211,7 +218,6 @@ class EntryModel
         if (!$batchId) {
             return $this;
         }
-
         return $this->withFilter("filter(fn: (r) => r.batch_id == \"$batchId\")");
     }
 
@@ -283,10 +289,10 @@ class EntryModel
 
         $writeApi = $this->client->createWriteApi();
 
-        $entries = $entries->map(function ($row) {
+        $entries = $entries->map(function ($row) {;
             $point = Point::measurement('telescope_entries')
                 ->addField('uuid', $row->uuid)
-                ->addField('content', json_encode($row->content))
+                ->addField('content', json_encode($row->content, JSON_HEX_QUOT))
                 ->addField('batch_id', $row->batchId)
                 ->addField('family_hash', $row->familyHash)
                 ->addTag('type', $row->type);
