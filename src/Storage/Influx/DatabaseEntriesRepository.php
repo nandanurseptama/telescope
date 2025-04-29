@@ -47,7 +47,7 @@ class DatabaseEntriesRepository implements Contract
             ->map(
                 fn($row, $index) => new EntryResult(
                     $row['uuid'],
-                    $index,
+                    $row['sequence'],
                     $row['batch_id'],
                     $row['type'],
                     $row['family_hash'],

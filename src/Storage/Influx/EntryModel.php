@@ -40,7 +40,7 @@ class EntryModel
 
         return $this->client->options['default_timerange'];
     }
-    
+
     /**
      * Create new instance of EntryModel with influx connection
      *
@@ -95,6 +95,7 @@ class EntryModel
             ->whereBatchId($options->batchId)
             ->whereFamilyHash($options->familyHash)
             ->whereUuid($options->uuids)
+            ->orderBy("_time", true)
             ->offset($options->beforeSequence);
     }
 
@@ -108,7 +109,6 @@ class EntryModel
                 $query,
                 "range(start: $timerange)",
                 "filter(fn: (r) => r._measurement == \"telescope_entries\")",
-                "stateCount(fn: (r) => r._field == \"batch_id\", column: \"sequence\")",
             ]
         );
 
@@ -122,24 +122,19 @@ class EntryModel
             $query = join("\n|> ", [$query, $sorts]);
         }
 
+        $offset = "";
+
+        if ($this->offset > 0) {
+            $offset = ",offset: " . $this->offset + 1;
+        }
+
         $query = join(
             "\n|> ",
             [
                 $query,
-                "limit(n : $this->limit)",
+                "limit(n : $this->limit $offset)",
             ]
         );
-
-        if ($this->offset > 0) {
-            $offset = $this->offset + 1;
-            $query = join(
-                "\n|> ",
-                [
-                    $query,
-                    "filter(fn: (r) => r.sequence == $offset)",
-                ]
-            );
-        }
 
         return $query;
     }
@@ -170,17 +165,18 @@ class EntryModel
             foreach ($table->records as $rowNum => $record) {
                 $sequence = $rowNum + ($this->offset > 0 ? $this->offset + 1 : 0);
                 // because we will have multiple fields at the same second in time, we need to merge the data into a single array after we query it out
-                $row = key_exists($sequence, $records) ? $records[$sequence] : $rowPlaceholder;
+                $row = key_exists($rowNum, $records) ? $records[$rowNum] : $rowPlaceholder;
                 $field = $record->getField();
 
                 $value = $field === 'content' ? json_decode($record->getValue(), true) : $record->getValue();
 
-                $records[$sequence] = array_merge(
+                $records[$rowNum] = array_merge(
                     $row,
                     [
                         $field => $value,
                         'type' => $record['type'],
-                        'created_at' => Carbon::parse($record->getTime())
+                        'created_at' => Carbon::parse($record->getTime()),
+                        'sequence' => $sequence,
                     ]
                 );
             }
