@@ -3,6 +3,7 @@
 namespace Laravel\Telescope\Storage\Influx;
 
 use Carbon\Carbon;
+use Illuminate\Contracts\Queue\EntityNotFoundException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use InfluxDB2\Client as InfluxClient;
@@ -23,7 +24,7 @@ class EntryModel
 
     private int $limit = 50;
 
-    private int $offset = 0;
+    private string $uuid;
 
     private function __construct(InfluxClient $client)
     {
@@ -96,8 +97,8 @@ class EntryModel
             ->whereBatchId($options->batchId)
             ->whereFamilyHash($options->familyHash)
             ->whereUuid($options->uuids)
-            ->orderBy("sequence", true)
-            ->offset($options->beforeSequence);
+            ->whereBeforeSequence($options->beforeSequence)
+            ->orderBy("sequence", true);
     }
 
     private function buildQuery(): string
@@ -111,6 +112,8 @@ class EntryModel
                 $query,
                 "range(start: $timerange)",
                 "filter(fn: (r) => r._measurement == \"telescope_entries\")",
+                "map(fn: (r) => ({r with sequence : uint(v: r._time) / uint(v : 1000000)}))",
+                "pivot(rowKey: [\"sequence\"], columnKey: [\"_field\"], valueColumn: \"_value\")",
             ]
         );
 
@@ -119,34 +122,20 @@ class EntryModel
             $query = join("\n|> ", [$query, $filters]);
         }
 
-        $query = join(
-            "\n|> ",
-            [
-                $query,
-                "map(fn: (r) => ({r with sequence : uint(v: r._time) / uint(v : 1000000)}))",
-                "pivot(rowKey: [\"sequence\"], columnKey: [\"_field\"], valueColumn: \"_value\")",
-            ]
-        );
-
         if (count($this->sorts) > 0) {
             $sorts = join("\n|> ", $this->sorts);
             $query = join("\n|> ", [$query, $sorts]);
         }
 
-        $offset = "";
-
-        if ($this->offset > 0) {
-            $offset = ",offset: " . $this->offset + 1;
-        }
-
         $query = join(
             "\n|> ",
             [
                 $query,
-                "limit(n : $this->limit $offset)",
+                "limit(n : $this->limit)",
                 "group(columns : [\"_time\", \"type\"])",
             ]
         );
+
 
         return $query;
     }
@@ -157,33 +146,23 @@ class EntryModel
     public function get()
     {
         $query = $this->buildQuery();
+        //dd($query);
         $queryApi = $this->client->createQueryApi();
         $tables = $queryApi->query($query);
 
         $records = [];
-        $rowPlaceholder = [
-            'family_hash' => null,
-            'type' => null,
-            'batch_id' => null,
-            'uuid' => null,
-            'created_at' => null,
-            'content' => [],
-            'sequence' => null,
-            'tags' => [],
-        ];
-
 
         foreach ($tables as $table) {
             foreach ($table->records as $record) {
-                //dd($record);
-                array_push($records,[
+                $content = json_decode($record['content'], true);
+                array_push($records, [
                     'type' => $record['type'],
                     'created_at' => Carbon::createFromTimestampMs($record['sequence']),
                     'sequence' => $record['sequence'],
                     'batch_id' => $record['batch_id'],
                     'uuid' => $record['uuid'],
                     'family_hash' => $record['family_hash'],
-                    'content' => json_decode($record['content'], true),
+                    'content' => $content === null ? [] : $content,
                     'tags' => [$record['type']],
                 ]);
             }
@@ -195,11 +174,56 @@ class EntryModel
         return $collection;
     }
 
+    /**
+     * Get telescope records from influx
+     */
+    public function firstOrFail()
+    {
+        $query = $this->take(1)->buildQuery();
+        $queryApi = $this->client->createQueryApi();
+        $tables = $queryApi->query($query);
+
+        $records = [];
+
+        if (count($tables) < 1) {
+            throw new EntityNotFoundException("EntryResult", $this->uuid);
+        }
+
+        $records = $tables[0]->records;
+
+        if (count($records) < 1) {
+            throw new EntityNotFoundException("EntryResult", $this->uuid);
+        }
+
+        $record = $records[0]->values;
+
+        $content = json_decode($record['content'], true);
+
+
+        $row = [
+            'type' => $record['type'],
+            'created_at' => Carbon::createFromTimestampMs($record['sequence']),
+            'sequence' => $record['sequence'],
+            'batch_id' => $record['batch_id'],
+            'uuid' => $record['uuid'],
+            'family_hash' => !key_exists('family_hash', $record) ? null : $record['family_hash'],
+            'content' => $content === null ? [] : $content,
+            'tags' => [$record['type']],
+        ];
+
+
+        $collection = Collection::make([$row]);
+
+        return $collection->firstOrFail();
+    }
+
     public function whereUuid(?string $id): EntryModel
     {
         if (!$id) {
             return $this;
         }
+
+        $this->uuid = $id;
 
         return $this->withFilter("filter(fn: (r) => r.uuid == \"$id\")");
     }
@@ -248,6 +272,17 @@ class EntryModel
         }, $this);
     }
 
+    public function whereBeforeSequence(?string $sequence): EntryModel
+    {
+        if (!$sequence) {
+            return $this;
+        }
+
+        $sequence = intval($sequence);
+
+        return $this->withFilter("filter(fn: (r) => r.sequence < $sequence)");
+    }
+
     public function whereTag(?string $tag)
     {
         if (!$tag) {
@@ -263,17 +298,6 @@ class EntryModel
         }
 
         return $this->withFilter("filter(fn: (r) => r.$tagKey == \"$tagValue\")");
-    }
-
-    public function offset(mixed $offset): EntryModel
-    {
-        if (!$offset) {
-            return $this;
-        }
-
-        $this->offset = intval($offset);
-
-        return $this;
     }
 
     /**

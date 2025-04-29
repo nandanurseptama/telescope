@@ -29,7 +29,20 @@ class DatabaseEntriesRepository implements Contract
      */
     public function find($id): EntryResult
     {
-        return new EntryResult('', '', '', '', '', [], Carbon::now(), []);
+        $entry =  EntryModel::on($this->client)->whereUuid(
+            $id
+        )->firstOrFail();
+
+        return new EntryResult(
+            $entry['uuid'],
+            $entry['sequence'],
+            $entry['batch_id'],
+            $entry['type'],
+            $entry['family_hash'],
+            $entry['content'],
+            $entry['created_at'],
+            $entry['tags']
+        );
     }
 
     /**
