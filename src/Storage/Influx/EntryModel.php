@@ -98,7 +98,8 @@ class EntryModel
             ->whereFamilyHash($options->familyHash)
             ->whereUuid($options->uuids)
             ->whereBeforeSequence($options->beforeSequence)
-            ->orderBy("sequence", true);
+            ->whereTags($options->tag)
+            ->orderBy("_time", true);
     }
 
     private function buildQuery(): string
@@ -112,8 +113,18 @@ class EntryModel
                 $query,
                 "range(start: $timerange)",
                 "filter(fn: (r) => r._measurement == \"telescope_entries\")",
+            ]
+        );
+
+
+        $query = join(
+            "\n|> ",
+            [
+                $query,
+                "map(fn: (r) => ({ r with _field: \"field_\" + r._field }))",
+                "pivot(rowKey: [\"_time\"], columnKey: [\"_field\"], valueColumn: \"_value\")",
+                "group()",
                 "map(fn: (r) => ({r with sequence : uint(v: r._time) / uint(v : 1000000)}))",
-                "pivot(rowKey: [\"sequence\"], columnKey: [\"_field\"], valueColumn: \"_value\")",
             ]
         );
 
@@ -122,19 +133,13 @@ class EntryModel
             $query = join("\n|> ", [$query, $filters]);
         }
 
+
         if (count($this->sorts) > 0) {
             $sorts = join("\n|> ", $this->sorts);
             $query = join("\n|> ", [$query, $sorts]);
         }
 
-        $query = join(
-            "\n|> ",
-            [
-                $query,
-                "limit(n : $this->limit)",
-                "group(columns : [\"_time\", \"type\"])",
-            ]
-        );
+        $query = join("\n|>", [$query, "limit(n : $this->limit)"]);
 
 
         return $query;
@@ -146,7 +151,6 @@ class EntryModel
     public function get()
     {
         $query = $this->buildQuery();
-        //dd($query);
         $queryApi = $this->client->createQueryApi();
         $tables = $queryApi->query($query);
 
@@ -154,17 +158,39 @@ class EntryModel
 
         foreach ($tables as $table) {
             foreach ($table->records as $record) {
-                $content = json_decode($record['content'], true);
-                array_push($records, [
-                    'type' => $record['type'],
-                    'created_at' => Carbon::createFromTimestampMs($record['sequence']),
-                    'sequence' => $record['sequence'],
-                    'batch_id' => $record['batch_id'],
-                    'uuid' => $record['uuid'],
-                    'family_hash' => $record['family_hash'],
+
+                $value = $record->values;
+
+                $tags = [];
+                $content = json_decode($value['field_content'], true);
+                $familyHash = !key_exists('field_family_hash', $value) ? null : $value['field_family_hash'];
+
+                $row = [
+                    'type' => $value['type'],
+                    'created_at' => Carbon::createFromTimestampMs($value['sequence']),
+                    'sequence' => $value['sequence'],
+                    'batch_id' => $value['field_batch_id'],
+                    'uuid' => $value['field_uuid'],
+                    'family_hash' => $familyHash,
                     'content' => $content === null ? [] : $content,
-                    'tags' => [$record['type']],
-                ]);
+                    'tags' => $tags,
+                ];
+
+                foreach ($value as $key => $field) {
+                    if ($key === 'result' || $key === 'table' || $key === 'sequence' || $key === 'type' || str_starts_with($key, '_') || str_starts_with($key, 'field_')) {
+                        continue;
+                    }
+
+                    if ($field === null) {
+                        continue;
+                    }
+
+                    array_push($tags, implode(":", [$key, $field]));
+                }
+
+                $row['tags'] = $tags;
+
+                array_push($records, $row);
             }
         }
 
@@ -197,19 +223,35 @@ class EntryModel
 
         $record = $records[0]->values;
 
-        $content = json_decode($record['content'], true);
+        $tags = [];
+        $content = json_decode($record['field_content'], true);
+        $familyHash = !key_exists('field_family_hash', $record) ? null : $record['field_family_hash'];
 
 
         $row = [
             'type' => $record['type'],
             'created_at' => Carbon::createFromTimestampMs($record['sequence']),
             'sequence' => $record['sequence'],
-            'batch_id' => $record['batch_id'],
-            'uuid' => $record['uuid'],
-            'family_hash' => !key_exists('family_hash', $record) ? null : $record['family_hash'],
+            'batch_id' => $record['field_batch_id'],
+            'uuid' => $record['field_uuid'],
+            'family_hash' => $familyHash,
             'content' => $content === null ? [] : $content,
-            'tags' => [$record['type']],
+            'tags' => [],
         ];
+
+        foreach ($record as $key => $field) {
+            if ($key === 'result' || $key === 'table' || $key === 'sequence' || $key === 'type' || str_starts_with($key, '_') || str_starts_with($key, 'field_')) {
+                continue;
+            }
+
+            if ($field === null) {
+                continue;
+            }
+
+            array_push($tags, implode(":", [$key, $field]));
+        }
+
+        $row['tags'] = $tags;
 
 
         $collection = Collection::make([$row]);
@@ -225,7 +267,7 @@ class EntryModel
 
         $this->uuid = $id;
 
-        return $this->withFilter("filter(fn: (r) => r.uuid == \"$id\")");
+        return $this->withFilter("filter(fn: (r) => r.field_uuid == \"$id\")");
     }
 
     public function whereFamilyHash(?string $familyHash): EntryModel
@@ -234,7 +276,7 @@ class EntryModel
             return $this;
         }
 
-        return $this->withFilter("filter(fn: (r) => r.family_hash == \"$familyHash\")");
+        return $this->withFilter("filter(fn: (r) => r.field_family_hash == \"$familyHash\")");
     }
 
     public function whereBatchId(?string $batchId): EntryModel
@@ -242,7 +284,7 @@ class EntryModel
         if (!$batchId) {
             return $this;
         }
-        return $this->withFilter("filter(fn: (r) => r.batch_id == \"$batchId\")");
+        return $this->withFilter("filter(fn: (r) => r.field_batch_id == \"$batchId\")");
     }
 
     public function whereType(?string $type): EntryModel
@@ -297,7 +339,7 @@ class EntryModel
             return $this;
         }
 
-        return $this->withFilter("filter(fn: (r) => r.$tagKey == \"$tagValue\")");
+        return $this->withFilter("filter(fn: (r) => r[\"$tagKey\"] == \"$tagValue\")");
     }
 
     /**
@@ -322,7 +364,10 @@ class EntryModel
                 ->addTag('type', $row->type);
 
             if (count($row->tags) > 0) {
-                foreach ($row->tags as $tagKey => $tagValue) {
+                foreach ($row->tags as $tag) {
+                    $separated = explode(":", $tag);
+                    $tagKey = $separated[0];
+                    $tagValue = $separated[1];
                     $point = $point->addTag($tagKey, $tagValue);
                 }
             }
