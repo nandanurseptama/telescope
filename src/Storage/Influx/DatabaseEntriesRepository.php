@@ -82,7 +82,6 @@ class DatabaseEntriesRepository implements Contract, PrunableRepository
      */
     public function store(Collection $entries)
     {
-        Log::info('store entries', ['entries' => $entries]);
         EntryModel::on($this->client)->storeEntries($entries);
         return;
     }
@@ -120,8 +119,9 @@ class DatabaseEntriesRepository implements Contract, PrunableRepository
                 ->type($update->type)
                 ->withFamilyHash($entry['family_hash'])
                 ->batchId($entry['batch_id'])
-                ->withRecordedAt(Carbon::parse($entry['_time']))
                 ->tags($entry['tags']);
+
+            $newEntry->recordedAt = Carbon::parse($entry['_time']);
 
             EntryModel::on($this->client)
                 ->storeEntries(Collection::make([$newEntry]));

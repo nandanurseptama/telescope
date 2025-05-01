@@ -30,6 +30,7 @@ class FeatureTestCase extends TestCase
     {
         parent::setUp();
 
+        // load .env file for test
         if (file_exists(__DIR__ . '/../.env')) {
             $dotenv = \Dotenv\Dotenv::createImmutable(dirname(__DIR__));
             $dotenv->load();

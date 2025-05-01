@@ -132,19 +132,6 @@ class IncomingEntry
     }
 
     /**
-     * Assign the entry a recorded at
-     *
-     * @param  \DateTimeInterface  $recordedAt
-     * @return $this
-     */
-    public function withRecordedAt(\DateTimeInterface $recordedAt)
-    {
-        $this->recordedAt = $recordedAt;
-
-        return $this;
-    }
-
-    /**
      * Set the currently authenticated user.
      *
      * @param  \Illuminate\Contracts\Auth\Authenticatable  $user
