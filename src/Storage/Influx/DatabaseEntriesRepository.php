@@ -3,6 +3,7 @@
 namespace Laravel\Telescope\Storage\Influx;
 
 use Carbon\Carbon;
+use DateTime;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Laravel\Telescope\Contracts\EntriesRepository as Contract;
@@ -10,9 +11,10 @@ use InfluxDB2\Client as InfluxClient;
 use Laravel\Telescope\EntryResult;
 use Laravel\Telescope\Storage\EntryQueryOptions;
 use \InfluxDB2\Model\WritePrecision;
+use Laravel\Telescope\Contracts\PrunableRepository;
 use Laravel\Telescope\IncomingEntry;
 
-class DatabaseEntriesRepository implements Contract
+class DatabaseEntriesRepository implements Contract, PrunableRepository
 {
     private InfluxClient $client;
 
@@ -93,7 +95,6 @@ class DatabaseEntriesRepository implements Contract
      */
     public function update(Collection $updates)
     {
-        Log::info('update entries', ['entries' => $updates]);
 
         $failedUpdates = [];
 
@@ -110,8 +111,8 @@ class DatabaseEntriesRepository implements Contract
             }
 
             $content = array_merge(
-                json_decode($entry->content ?? $entry['content'] ?? [], true) ?: [],
-                $update->changes
+                $entry['content'] ?? [],
+                $update->changes['content']
             );
 
             $newEntry = new IncomingEntry(content: $content, uuid: $update->uuid);
@@ -177,5 +178,23 @@ class DatabaseEntriesRepository implements Contract
     public function stopMonitoring(array $tags)
     {
         return [];
+    }
+
+    /**
+     * Prune all of the entries older than the given date.
+     *
+     * @param  \DateTimeInterface  $before
+     * @param  bool  $keepExceptions
+     * @return int
+     */
+    public function prune(\DateTimeInterface $before, $keepExceptions)
+    {
+        $startDate = Carbon::createFromTimestampMs(0)->toDateTime();
+        $endDate = Carbon::parse($before)->toDateTime();
+
+        EntryModel::on($this->client)->prune(
+            $startDate,
+            $endDate,
+        );
     }
 }

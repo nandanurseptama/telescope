@@ -6,8 +6,10 @@ use Carbon\Carbon;
 use Illuminate\Contracts\Queue\EntityNotFoundException;
 use Illuminate\Support\Collection;
 use InfluxDB2\Client as InfluxClient;
+use InfluxDB2\Model\DeletePredicateRequest;
 use InfluxDB2\Model\WritePrecision;
 use InfluxDB2\Point;
+use InfluxDB2\Service\DeleteService;
 use Laravel\Telescope\Storage\EntryQueryOptions;
 
 class EntryModel
@@ -341,5 +343,74 @@ class EntryModel
         });
 
         $writeApi->write($entries->toArray(), WritePrecision::NS);
+    }
+
+    public static function getDateRangeFromInfluxInterval(string $interval): array
+    {
+        $now = Carbon::now();
+
+        // Match +/- and the time unit
+        if (!preg_match('/^(-?)(\d+)([smhdw])$/', $interval, $matches)) {
+            throw new \InvalidArgumentException("Invalid interval format: $interval");
+        }
+
+        [$_full, $sign, $amount, $unit] = $matches;
+
+        // Map Influx units to Carbon methods
+        $unitMap = [
+            's' => 'seconds',
+            'm' => 'minutes',
+            'h' => 'hours',
+            'd' => 'days',
+            'w' => 'weeks',
+        ];
+
+        if (!isset($unitMap[$unit])) {
+            throw new \InvalidArgumentException("Unsupported time unit: $unit");
+        }
+
+        $amount = (int) $amount;
+
+        if ($sign === '-') {
+            // Range: now - interval -> now
+            $start = $now->copy()->sub($unitMap[$unit], $amount);
+            $end = $now;
+        } else {
+            // Range: now -> now + interval
+            $start = $now;
+            $end = $now->copy()->add($unitMap[$unit], $amount);
+        }
+
+        return [
+            'start_date' => $start,
+            'end_date' => $end,
+        ];
+    }
+
+    /**
+     * Prune records from $startDate to $endDate
+     *
+     * @param   \DateTime   $startDate
+     * @param   \DateTime   $endDate
+     *
+     * @return void
+     */
+    public function prune($startDate, $endDate)
+    {
+        $service = $this->client->createService(
+            DeleteService::class,
+        );
+        $predicate = new DeletePredicateRequest();
+        $predicate->setStart($startDate);
+        $predicate->setStop($endDate);
+        $predicate->setPredicate("_measurement=\"telescope_entries\"");
+
+        $service->postDelete(
+            delete_predicate_request: $predicate,
+            org : $this->client->options['org'],
+            bucket : $this->client->options['bucket'],
+        );
+
+        $this->client->close();
     }
 }

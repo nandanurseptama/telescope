@@ -4,6 +4,7 @@ namespace Laravel\Telescope\Tests;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\Queue;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Testing\TestResponse;
 use Laravel\Telescope\Contracts\EntriesRepository;
 use Laravel\Telescope\Storage\DatabaseEntriesRepository;
@@ -18,9 +19,22 @@ class FeatureTestCase extends TestCase
 {
     use WithWorkbench, RefreshDatabase, WithLaravelMigrations;
 
+    /**
+     * Automatically loads environment file if available.
+     *
+     * @var bool
+     */
+    protected $loadEnvironmentVariables = true;
+
     protected function setUp(): void
     {
         parent::setUp();
+
+        if (file_exists(__DIR__ . '/../.env')) {
+            $dotenv = \Dotenv\Dotenv::createImmutable(dirname(__DIR__));
+            $dotenv->load();
+        }
+
 
         TestResponse::macro('terminateTelescope', [$this, 'terminateTelescope']);
 
