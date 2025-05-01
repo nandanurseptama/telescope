@@ -5,7 +5,6 @@ namespace Laravel\Telescope\Storage\Influx;
 use Carbon\Carbon;
 use Illuminate\Contracts\Queue\EntityNotFoundException;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Log;
 use InfluxDB2\Client as InfluxClient;
 use InfluxDB2\Model\WritePrecision;
 use InfluxDB2\Point;
@@ -174,6 +173,7 @@ class EntryModel
                     'family_hash' => $familyHash,
                     'content' => $content === null ? [] : $content,
                     'tags' => $tags,
+                    '_time' => $value['_time']
                 ];
 
                 foreach ($value as $key => $field) {
@@ -202,63 +202,21 @@ class EntryModel
 
     /**
      * Get telescope records from influx
+     *
+     * @return array
      */
     public function firstOrFail()
     {
-        $query = $this->take(1)->buildQuery();
-        $queryApi = $this->client->createQueryApi();
-        $tables = $queryApi->query($query);
-
-        $records = [];
-
-        if (count($tables) < 1) {
-            throw new EntityNotFoundException("EntryResult", $this->uuid);
-        }
-
-        $records = $tables[0]->records;
-
-        if (count($records) < 1) {
-            throw new EntityNotFoundException("EntryResult", $this->uuid);
-        }
-
-        $record = $records[0]->values;
-
-        $tags = [];
-        $content = json_decode($record['field_content'], true);
-        $familyHash = !key_exists('field_family_hash', $record) ? null : $record['field_family_hash'];
-
-
-        $row = [
-            'type' => $record['type'],
-            'created_at' => Carbon::createFromTimestampMs($record['sequence']),
-            'sequence' => $record['sequence'],
-            'batch_id' => $record['field_batch_id'],
-            'uuid' => $record['field_uuid'],
-            'family_hash' => $familyHash,
-            'content' => $content === null ? [] : $content,
-            'tags' => [],
-        ];
-
-        foreach ($record as $key => $field) {
-            if ($key === 'result' || $key === 'table' || $key === 'sequence' || $key === 'type' || str_starts_with($key, '_') || str_starts_with($key, 'field_')) {
-                continue;
-            }
-
-            if ($field === null) {
-                continue;
-            }
-
-            array_push($tags, implode(":", [$key, $field]));
-        }
-
-        $row['tags'] = $tags;
-
-
-        $collection = Collection::make([$row]);
-
-        return $collection->firstOrFail();
+        return $this->take(1)->get()->firstOrFail();
     }
 
+    /**
+     * Filter entry by id
+     *
+     * if `$id` is null will ignore filter
+     *
+     * @param null|string $id entry id
+     */
     public function whereUuid(?string $id): EntryModel
     {
         if (!$id) {
@@ -270,6 +228,13 @@ class EntryModel
         return $this->withFilter("filter(fn: (r) => r.field_uuid == \"$id\")");
     }
 
+    /**
+     * Filter entry by family hash
+     *
+     * if `$id` is null will ignore filter
+     *
+     * @param null|string $id entry id
+     */
     public function whereFamilyHash(?string $familyHash): EntryModel
     {
         if (!$familyHash) {
@@ -358,7 +323,7 @@ class EntryModel
         $entries = $entries->map(function ($row) {;
             $point = Point::measurement('telescope_entries')
                 ->addField('uuid', $row->uuid)
-                ->addField('content', json_encode($row->content, JSON_HEX_QUOT))
+                ->addField('content', json_encode($row->content, JSON_HEX_QUOT | JSON_INVALID_UTF8_SUBSTITUTE))
                 ->addField('batch_id', $row->batchId)
                 ->addField('family_hash', $row->familyHash)
                 ->addTag('type', $row->type);
@@ -372,9 +337,9 @@ class EntryModel
                 }
             }
 
-            return $point->time(Carbon::now()->getTimestampMs());
+            return $point->time(Carbon::parse($row->recordedAt)->getTimestampMs() * 1_000_000);
         });
 
-        $writeApi->write($entries->toArray(), WritePrecision::MS);
+        $writeApi->write($entries->toArray(), WritePrecision::NS);
     }
 }

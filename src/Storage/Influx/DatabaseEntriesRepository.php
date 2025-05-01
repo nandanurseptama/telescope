@@ -10,6 +10,7 @@ use InfluxDB2\Client as InfluxClient;
 use Laravel\Telescope\EntryResult;
 use Laravel\Telescope\Storage\EntryQueryOptions;
 use \InfluxDB2\Model\WritePrecision;
+use Laravel\Telescope\IncomingEntry;
 
 class DatabaseEntriesRepository implements Contract
 {
@@ -79,7 +80,7 @@ class DatabaseEntriesRepository implements Contract
      */
     public function store(Collection $entries)
     {
-        // Log::info('store entries', ['entries' => $entries]);
+        Log::info('store entries', ['entries' => $entries]);
         EntryModel::on($this->client)->storeEntries($entries);
         return;
     }
@@ -92,7 +93,40 @@ class DatabaseEntriesRepository implements Contract
      */
     public function update(Collection $updates)
     {
-        return null;
+        Log::info('update entries', ['entries' => $updates]);
+
+        $failedUpdates = [];
+
+        foreach ($updates as $update) {
+            $entry = EntryModel::on($this->client)
+                ->whereUuid($update->uuid)
+                ->whereType($update->type)
+                ->get()
+                ->first();
+
+            if (! $entry) {
+                $failedUpdates[] = $update;
+                continue;
+            }
+
+            $content = array_merge(
+                json_decode($entry->content ?? $entry['content'] ?? [], true) ?: [],
+                $update->changes
+            );
+
+            $newEntry = new IncomingEntry(content: $content, uuid: $update->uuid);
+            $newEntry  =  $newEntry
+                ->type($update->type)
+                ->withFamilyHash($entry['family_hash'])
+                ->batchId($entry['batch_id'])
+                ->withRecordedAt(Carbon::parse($entry['_time']))
+                ->tags($entry['tags']);
+
+            EntryModel::on($this->client)
+                ->storeEntries(Collection::make([$newEntry]));
+        }
+
+        return collect($failedUpdates);
     }
 
     /**
